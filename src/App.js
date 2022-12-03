@@ -1,7 +1,8 @@
-import './App.css';
+// import './App.css';
 import ExcelJS from 'exceljs';
+import { addData, deleteData, getDatas } from './firebase';
 import { v4 as uuid } from 'uuid';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Stack,
   TextField,
@@ -16,42 +17,45 @@ import {
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { AdapterMoment } from '@mui/x-date-pickers/AdapterMoment';
-import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import moment from 'moment';
 import Snack from './components/Snack';
+import Header from './components/Header';
+import Footer from './components/Footer';
+
 
 function App() {
-  const [name, setName] = useState('');
+  const [title, setTitle] = useState('');
   const [date, setDate] = useState(
-    moment(new Date()).format('YYYY-MM-DD HH:mm:ss')
+    moment(new Date()).format('YYYY年MM月DD日 HH時mm')
   );
   const [price, setPrice] = useState('');
   const [data, setData] = useState([]);
   const [sum, setSum] = useState(0);
   const [open, setOpen] = useState(false);
 
-  const handleChange = (newValue) => {
-    setDate(newValue);
-  };
+  useEffect(() => {
+    getDatas().then(res => setData(res))
+  }, [])
 
   const inputHandler = (e) => {
     e.preventDefault();
-    if (name === '' || date === '' || price === '') {
+    if (title === '' || date === "" || price === '') {
       setOpen(true);
       return;
     }
     const dataObj = {
       id: uuid(),
-      name: name,
-      date: date,
+      title: title,
+      date: moment(date).format('YYYY年MM日DD月 hh時mm分'),
       price: Number(price).toLocaleString(),
     };
     const newData = [...data, dataObj];
     console.log(newData);
     setData(newData);
+    addData(dataObj.id, dataObj.title, dataObj.date, dataObj.price)
     setSum((prev) => prev + Number(price));
-    setName('');
+    setTitle('');
     setDate(moment(new Date()).format('YYYY-MM-DD HH:mm:ss'));
     setPrice('');
   };
@@ -62,18 +66,22 @@ function App() {
     // Workbookのインスタンス
     const workbook = new ExcelJS.Workbook();
     // Workbookに新しいWorksheetを追加
-    workbook.addWorksheet('Mysheet');
-    const worksheet = workbook.getWorksheet('Mysheet');
+    workbook.addWorksheet(`${new Date().getMonth() + 1}月分出費`);
+    const worksheet = workbook.getWorksheet(`${new Date().getMonth() + 1}月分出費`);
 
     //列を定義
     worksheet.columns = [
-      { header: '名前', key: 'name' },
-      { header: '日付', key: 'date' },
-      { header: '金額', key: 'price' },
+      { header: '使用用途', key: 'title', font: {bold: 'true'}, style: {fill: {type: 'pattern', pattern: 'solid', bgColor: {argb: 'ff00ff00'}}}},
+      { header: '日付', key: 'date', width: 23, font: {bold: 'true'}, style: {fill: {type: 'pattern', pattern: 'solid', bgColor: {argb: 'ff00ff00'}}} },
+      { header: '金額', key: 'price', font: {bold: 'true'}, style: {fill: {type: 'pattern', pattern: 'solid', bgColor: {argb: 'ff00ff00'}}}},
     ];
+    worksheet.views = [
+      {state: 'frozen', ySplit: 1}
+    ]
 
     //行を定義
     data.forEach((data) => worksheet.addRow(data));
+    worksheet.addRow(["合計金額", `${sum.toLocaleString()}円`])
 
     // UIntBArrayを生成
     const uintbarray = await workbook.xlsx.writeBuffer();
@@ -92,6 +100,7 @@ function App() {
     const _data = [...data];
     const copiedData = _data.filter((d) => d.id !== id);
     setData(copiedData);
+    deleteData(id)
   };
 
   const handleClose = () => {
@@ -100,15 +109,16 @@ function App() {
 
   return (
     <LocalizationProvider dateAdapter={AdapterMoment}>
-      <Box sx={{ flexGlow: 1, padding: '10px' }}>
-        <Grid container>
+      <Header/>
+      <Box sx={{ flexGlow: 1, padding: '10px', height: '77vh'}}>
+        <Grid container justifyContent='center'>
           <Grid item xs={5}>
             <Stack spacing={2}>
               <TextField
-                label="Name"
+                label="Title"
                 variant="outlined"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
               />
               <TextField
                 label="Price"
@@ -116,11 +126,13 @@ function App() {
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
               />
-              <DateTimePicker
+              <TextField 
+                type="datetime-local"
                 label="日付"
-                value={date}
-                onChange={handleChange}
-                renderInput={(params) => <TextField {...params} />}
+                onChange={(e) => setDate(e.target.value)}
+                InputLabelProps={{
+                  shrink: true
+                }}
               />
               <Button variant="contained" onClick={(e) => inputHandler(e)}>
                 Add
@@ -128,16 +140,16 @@ function App() {
               <Button
                 variant="outlined"
                 onClick={(e) => onClickExport(e, data)}>
-                Excel
+                Convert to Excel
               </Button>
             </Stack>
           </Grid>
-          <Grid item xs={6}>
+          <Grid item xs={6} sx={{overflowY: 'scroll', maxHeight: '340px'}}>
             <List>
               {data.map((d) => (
                 <ListItem key={d.id}>
                   <ListItemText
-                    primary={`${d.name}: ${d.price}円`}
+                    primary={`${d.title}: ${d.price}円`}
                     secondary={d.date}
                   />
                   <IconButton
@@ -152,18 +164,19 @@ function App() {
             </List>
           </Grid>
         </Grid>
-        <TextField
-          sx={{ marginTop: '20px' }}
-          label="合計金額"
-          variant="filled"
-          aria-readonly
-          value={sum.toLocaleString()}
-          InputProps={{
-            endAdornment: <InputAdornment position="end">円</InputAdornment>,
-          }}
-        />
+            <TextField
+              sx={{ marginTop: '20px', overflow: 'auto', marginLeft: '53px'}}
+              label="合計金額"
+              variant="filled"
+              aria-readonly
+              value={sum.toLocaleString()}
+              InputProps={{
+                endAdornment: <InputAdornment position="end">円</InputAdornment>,
+              }}
+              />
       </Box>
       <Snack open={open} onClose={handleClose} />
+      <Footer />
     </LocalizationProvider>
   );
 }
